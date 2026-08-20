@@ -22,6 +22,14 @@ DEFAULT_SRC = Path.home() / "Downloads" / "ticket_data.xlsx"
 # Header lives on row 3; rows 1-2 are the report title banner.
 HEADER_ROW = 3
 
+# Personal columns. These are never needed to compute a resolution time, and
+# the published payload is world-readable once the page is hosted, so they are
+# dropped at the source rather than merely hidden in the UI.
+#   Created By / Updated User - names 241 individual residents and staff
+#   Subject / Comments        - free text; contains phone numbers and complaints
+#                               about named people, tied to a specific villa
+PERSONAL_COLUMNS = ["Created By", "Updated User", "Subject", "Comments"]
+
 # Columns carrying exactly one value across every row -> no information.
 DEAD_COLUMNS = {
     "Sub Category",              # always "None"
@@ -125,8 +133,6 @@ def main():
             # or AVERAGEIFS finds none of those rows. The UI trims for display.
             "category": raw_category(r.get("Category")),
             "type": clean(r.get("Type")) or "personal",
-            "subject": clean(r.get("Subject")) or "(no subject)",
-            "by": clean(r.get("Created By")) or "Unknown",
             "status": status,
             # Raw escalation value kept as-is; the UI maps it to Urgent/Usual.
             "esc": clean(r.get("Escalation Level")) or "NA",
@@ -153,6 +159,7 @@ def main():
         "flats": len({t["flat"] for t in tickets}),
         "escalationLabels": ESCALATION_LABELS,
         "droppedColumns": dropped_dead,
+        "personalColumns": PERSONAL_COLUMNS,
         "droppedRows": skipped,
     }
 
@@ -170,6 +177,7 @@ def main():
     print(f"  flats        : {meta['flats']}")
     print(f"  range        : {meta['rangeStart'][:10]} -> {meta['rangeEnd'][:10]}")
     print(f"  dropped cols : {', '.join(dropped_dead)}")
+    print(f"  personal cols: {', '.join(PERSONAL_COLUMNS)} (excluded from payload)")
     print("  escalation   :", dict(Counter(t["esc"] for t in tickets)))
 
 

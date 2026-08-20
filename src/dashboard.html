@@ -199,8 +199,10 @@ main{max-width:1180px;margin:0 auto;padding:28px 24px 80px;display:flex;flex-dir
 .cmp{display:flex;flex-direction:column;gap:9px;margin-top:2px}
 .cmp-row{display:grid;grid-template-columns:74px 1fr 66px;align-items:center;gap:11px;font-size:12px}
 .cmp-row .lbl{color:var(--ink-2);text-align:right}
-.track{height:16px;background:var(--sunk);border-radius:4px;overflow:hidden}
-.fill{height:100%;border-radius:4px;transition:width .5s cubic-bezier(.4,0,.2,1)}
+/* Both must be block: a span is inline by default and an inline box ignores
+   width and height, which silently collapses every bar to zero area. */
+.track{display:block;height:16px;background:var(--sunk);border-radius:4px;overflow:hidden}
+.fill{display:block;height:100%;border-radius:4px;transition:width .5s cubic-bezier(.4,0,.2,1)}
 .fill.me{background:var(--accent)}
 .fill.soc{background:var(--neutral-mark)}
 .cmp-row .val{font-family:"IBM Plex Mono",monospace;font-size:12px;font-weight:600;text-align:right}

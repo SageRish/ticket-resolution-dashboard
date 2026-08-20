@@ -882,7 +882,6 @@
         "<td>" + dt(t.created) + "</td>" +
         "<td>" + (t.open ? '<span class="pill open">Open</span>' : dt(t.closed)) + "</td>" +
         "<td>" + esc(catLabel(t.category)) + "</td>" +
-        "<td>" + esc(t.subject) + "</td>" +
         '<td><span class="pill ' + (t.esc === "Level-1" ? "urgent" : "usual") + '">' + ESC[t.esc] + "</span></td>" +
         '<td class="n">' + dhm(t.mins) + "</td>" +
         '<td class="n">' + n0(t.mins) + "</td></tr>";
@@ -890,10 +889,11 @@
 
     return '<div class="panel"><div class="panel-h"><div>' +
       "<h2>Every ticket from " + esc(f) + "</h2>" +
-      "<p>The rows behind the averages above. <b>Minutes</b> is the value the helper column produces for that ticket &mdash; " +
-      "check any one of them by hand.</p></div></div>" +
+      "<p>The rows behind the averages above. <b>Minutes</b> is the value the helper column produces for " +
+      "that ticket &mdash; check any one of them by hand. Ticket subjects and the names of whoever raised " +
+      "or handled each ticket are deliberately not published here.</p></div></div>" +
       '<div class="panel-b"><div class="tbl-scroll"><table><thead><tr>' +
-      "<th>Id</th><th>Raised</th><th>Closed</th><th>Category</th><th>Subject</th>" +
+      "<th>Id</th><th>Raised</th><th>Closed</th><th>Category</th>" +
       "<th>Escalation</th><th>Time taken</th><th>Minutes</th></tr></thead><tbody>" +
       body + "</tbody></table></div></div>" +
       fx("fx-ledger-" + f,
@@ -932,6 +932,13 @@
       "<section><h3>5. Columns that were dropped</h3><p>These held one identical value on all " + META.total +
       " rows, so they carry no information and are not shown.</p>" +
       '<ul class="drop">' + META.droppedColumns.map(function (c) { return "<li>" + esc(c) + "</li>"; }).join("") +
+      "</ul></section>" +
+
+      "<section><h3>5b. Personal columns, removed on purpose</h3><p>These name individual residents and " +
+      "staff, or carry free text about them. None of them is needed to compute a resolution time, and this " +
+      "page is meant to be hosted openly &mdash; so they are stripped when the data file is built, not " +
+      "merely hidden on screen. They are absent from the published data itself.</p>" +
+      '<ul class="drop">' + (META.personalColumns || []).map(function (c) { return "<li>" + esc(c) + "</li>"; }).join("") +
       "</ul></section>" +
 
       "<section><h3>6. Median first, average alongside</h3><p>The headline figure everywhere on this page " +

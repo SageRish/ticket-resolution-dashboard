@@ -68,10 +68,26 @@ dashboard's own "How every number on this page is built" panel.
 | Escalation levels | `Level-1` → **Urgent**, `NA` → **Usual**. No other value occurs |
 | `Category` | **Not trimmed.** The sheet stores `"Gardening "` with a trailing space; an Excel criterion must match it exactly or `AVERAGEIFS` finds nothing. The UI trims for display only |
 | Dropped columns | `Sub Category`, `Assignee`, `On Hold Time`, `Assignment Tat`, `Expected Turnaround Time(Ett)`, `Resolution Tat Ratio (Rtat/Ett)` — each holds one identical value on all 1177 rows |
+| Personal columns | `Created By`, `Updated User`, `Subject`, `Comments` are **stripped when the data file is built**, not merely hidden in the UI. They named 241 individual residents and staff and contained free text (including a phone number) tied to a specific villa. The published payload is world-readable once hosted, so none of it ships |
 | Headline measure | **Median**, computed with `MEDIAN(IF(...))` since Excel has no `MEDIANIFS` — an array formula (Ctrl+Shift+Enter before Excel 365). Rankings use the median too |
 | Rank ties | The displayed rank mirrors Excel's `RANK`, which gives tied values the same rank, so the badge always agrees with the published formula |
 | Averages | Plain arithmetic mean (`AVERAGEIFS`), no weighting, no outlier removal, shown beside every median |
 | Trend chart | Tickets grouped by the month or week they were **raised**. Buckets where 10%+ of tickets are still open are drawn dashed and shaded: an open ticket can only be measured to the cutoff, so those points are a floor, not a result |
+
+## Privacy
+
+The dashboard answers "how long do tickets take", which needs no one's name. The
+build therefore drops every personal column at the source — `data/tickets.js`
+and `data/tickets.json` contain no resident or staff names and no ticket text.
+Verify with:
+
+```bash
+grep -ic "subject\|created by" data/tickets.json
+```
+
+Villa numbers are retained, since looking up a villa is the whole point of the
+page. If your community treats the villa number itself as identifying, that is a
+policy decision to take before hosting this publicly.
 
 ## Layout
 
