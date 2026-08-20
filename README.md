@@ -8,6 +8,13 @@ The point of the thing is **transparency**: every number on the page ships with
 the Excel formula that reproduces it against the original export. Nothing is
 "trust me" — open the spreadsheet, paste the formula, get the same number.
 
+The headline measure is the **median**, not the mean. Society-wide the mean is
+3.6x the median and 78% of tickets beat it, so it describes almost no real
+ticket; ranking by mean also moves 99 of the 175 villas by more than twenty
+places versus ranking by median. The mean and the slowest ticket stay visible
+next to every median so the tail is never hidden. The dashboard argues this
+case itself in its "Why the median leads" panel.
+
 ## Hosting
 
 `index.html` is a static page with no build step at view time. Serve the repo
@@ -46,7 +53,7 @@ dashboard displays:
 python scripts/gen_cases.py > cases.json && python scripts/audit_formulas.py path/to/ticket_data.xlsx cases.json
 ```
 
-Current status: **95 / 95 formulas reproduce the displayed value exactly.**
+Current status: **236 / 236 formulas reproduce the displayed value exactly.**
 
 ## How the data is treated
 
@@ -61,7 +68,10 @@ dashboard's own "How every number on this page is built" panel.
 | Escalation levels | `Level-1` → **Urgent**, `NA` → **Usual**. No other value occurs |
 | `Category` | **Not trimmed.** The sheet stores `"Gardening "` with a trailing space; an Excel criterion must match it exactly or `AVERAGEIFS` finds nothing. The UI trims for display only |
 | Dropped columns | `Sub Category`, `Assignee`, `On Hold Time`, `Assignment Tat`, `Expected Turnaround Time(Ett)`, `Resolution Tat Ratio (Rtat/Ett)` — each holds one identical value on all 1177 rows |
-| Averages | Plain arithmetic mean (`AVERAGEIFS`), no weighting, no outlier removal. Medians shown alongside because a few very old tickets pull the mean up |
+| Headline measure | **Median**, computed with `MEDIAN(IF(...))` since Excel has no `MEDIANIFS` — an array formula (Ctrl+Shift+Enter before Excel 365). Rankings use the median too |
+| Rank ties | The displayed rank mirrors Excel's `RANK`, which gives tied values the same rank, so the badge always agrees with the published formula |
+| Averages | Plain arithmetic mean (`AVERAGEIFS`), no weighting, no outlier removal, shown beside every median |
+| Trend chart | Tickets grouped by the month or week they were **raised**. Buckets where 10%+ of tickets are still open are drawn dashed and shaded: an open ticket can only be measured to the cutoff, so those points are a floor, not a result |
 
 ## Layout
 

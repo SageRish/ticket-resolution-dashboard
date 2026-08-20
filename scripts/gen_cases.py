@@ -26,8 +26,10 @@ med = lambda a: statistics.median(a) if a else None
 mins = lambda **kw: [t["mins"] for t in T if all(t[k] == v for k, v in kw.items())]
 
 villa_avg = {f: mean(mins(flat=f)) for f in flats}
-avgs = list(villa_avg.values())
-by_avg = sorted(flats, key=lambda f: villa_avg[f])
+villa_med = {f: med(mins(flat=f)) for f in flats}
+# the dashboard ranks on the median, so the AB column holds medians
+avgs = list(villa_med.values())
+by_avg = sorted(flats, key=lambda f: villa_med[f])
 counts = {f: len(mins(flat=f)) for f in flats}
 
 sample = list(dict.fromkeys([
@@ -49,25 +51,59 @@ for f in sample:
         add(f"{f} {k} count", f'=COUNTIFS({R("G")},"{f}",{R("N")},"{k}")', len(v))
         add(f"{f} {k} median", f'=MEDIAN(IF(({R("G")}="{f}")*({R("N")}="{k}"),{MR}))', med(v))
     add(f"{f} overall avg", f'=AVERAGEIFS({MR},{R("G")},"{f}")', villa_avg[f])
+    add(f"{f} overall median", f'=MEDIAN(IF({R("G")}="{f}",{MR}))', villa_med[f])
     add(f"{f} ticket count", f'=COUNTIF({R("G")},"{f}")', counts[f])
     add(f"{f} open count", f'=COUNTIFS({R("G")},"{f}",{R("L")},"-")',
         len([t for t in T if t["flat"] == f and t["open"]]))
-    me = villa_avg[f]
-    add(f"{f} villas LONGER", f'=COUNTIF({AVGR},">"&AVERAGEIFS({MR},{R("G")},"{f}"))',
+    me = villa_med[f]
+    add(f"{f} villas LONGER", f'=COUNTIF({AVGR},">"&MEDIAN(IF({R("G")}="{f}",{MR})))',
         len([a for a in avgs if a > me]))
-    add(f"{f} villas SHORTER", f'=COUNTIF({AVGR},"<"&AVERAGEIFS({MR},{R("G")},"{f}"))',
+    add(f"{f} villas SHORTER", f'=COUNTIF({AVGR},"<"&MEDIAN(IF({R("G")}="{f}",{MR})))',
         len([a for a in avgs if a < me]))
-    add(f"{f} rank", f'=RANK(AVERAGEIFS({MR},{R("G")},"{f}"),{AVGR},1)',
+    add(f"{f} rank", f'=RANK(MEDIAN(IF({R("G")}="{f}",{MR})),{AVGR},1)',
         len([a for a in avgs if a < me]) + 1)
 
 for k in ("Level-1", "NA"):
     add(f"society {k} avg", f'=AVERAGEIFS({MR},{R("N")},"{k}")', mean(mins(esc=k)))
 add("society overall avg", f"=AVERAGE({MR})", mean([t["mins"] for t in T]))
+add("society overall median", f"=MEDIAN({MR})", med([t["mins"] for t in T]))
+add("society slowest ticket", f"=MAX({MR})", max(t["mins"] for t in T))
+_mu = mean([t["mins"] for t in T])
+add("tickets faster than the average", f'=COUNTIF({MR},"<"&AVERAGE({MR}))',
+    len([t for t in T if t["mins"] < _mu]))
+for k in ("Level-1", "NA"):
+    add(f"society {k} median", f'=MEDIAN(IF({R("N")}="{k}",{MR}))', med(mins(esc=k)))
 
 for c in sorted({t["category"] for t in T}):
     add(f"society cat {c!r}", f'=AVERAGEIFS({MR},{R("D")},"{c}")', mean(mins(category=c)))
+    add(f"society cat median {c!r}", f'=MEDIAN(IF({R("D")}="{c}",{MR}))', med(mins(category=c)))
     v = mins(flat="Villa-151", category=c)
     if v:
         add(f"Villa-151 cat {c!r}", f'=AVERAGEIFS({MR},{R("G")},"Villa-151",{R("D")},"{c}")', mean(v))
+        add(f"Villa-151 cat median {c!r}",
+            f'=MEDIAN(IF(({R("G")}="Villa-151")*({R("D")}="{c}"),{MR}))', med(v))
+
+# ---- trend buckets, both grains ----
+from datetime import date, datetime, timedelta
+
+def month_key(t):
+    return t["created"][:7]
+
+def week_key(t):
+    d = datetime.fromisoformat(t["created"]).date()
+    return (d - timedelta(days=d.weekday())).isoformat()
+
+for grain, keyfn in (("month", month_key), ("week", week_key)):
+    buckets = {}
+    for t in T:
+        buckets.setdefault(keyfn(t), []).append(t)
+    for k in sorted(buckets):
+        rows = buckets[k]
+        v = [t["mins"] for t in rows]
+        add(f"{grain} {k} avg", f'=AVERAGEIFS({MR},{R("X")},"{k}")', mean(v))
+        add(f"{grain} {k} median", f'=MEDIAN(IF({R("X")}="{k}",{MR}))', med(v))
+        add(f"{grain} {k} count", f'=COUNTIF({R("X")},"{k}")', len(v))
+        add(f"{grain} {k} open", f'=COUNTIFS({R("X")},"{k}",{R("L")},"-")',
+            len([t for t in rows if t["open"]]))
 
 json.dump([c for c in cases if c["expect"] is not None], sys.stdout, indent=1)

@@ -41,6 +41,11 @@ def helper_minutes(B, L, R):
     return d * 1440 + h * 60 + m
 
 
+def created_date(B):
+    """Column B is text; this is the DATE(...) half of the published formula."""
+    return dt.date(2000 + int(B[6:8]), int(B[3:5]), int(B[0:2]))
+
+
 def load_sheet(src):
     ws = openpyxl.load_workbook(src, data_only=True)["Sheet1"]
     rows = {}
@@ -50,6 +55,10 @@ def load_sheet(src):
         cells = {k: ("" if ws.cell(row=r, column=c).value is None else str(ws.cell(row=r, column=c).value))
                  for k, c in COL.items()}
         cells["W"] = helper_minutes(cells["B"], cells["L"], cells["R"])
+        d = created_date(cells["B"])
+        # helper column X, both grains: TEXT(...,"yyyy-mm") and the Monday key
+        cells["Xm"] = d.strftime("%Y-%m")
+        cells["Xw"] = (d - dt.timedelta(days=d.weekday())).strftime("%Y-%m-%d")
         rows[r] = cells
     return rows
 
@@ -58,20 +67,43 @@ def load_sheet(src):
 CRIT = re.compile(r'\$([A-Z]{1,2})\$\d+:\$[A-Z]{1,2}\$\d+,"((?:[^"]|"")*)"')
 
 
+def _cell(c, col, val):
+    """Column X carries either grain; the criterion's own shape says which."""
+    if col == "X":
+        return c["Xw"] if len(val) == 10 else c["Xm"]
+    return c[col]
+
+
 def _match(rows, crits):
     out = []
     for r, c in rows.items():
-        if all(c[col] == val for col, val in crits):
+        if all(_cell(c, col, val) == val for col, val in crits):
             out.append(r)
     return out
 
 
 def evaluate(f, rows, villa_avgs):
+    """villa_avgs is the AB column: one MEDIAN per villa (the ranking basis)."""
     f = f.replace("\n", "").replace("  ", " ").strip()
 
     # =AVERAGE($W$4:$W$1180)
     if re.fullmatch(r"=AVERAGE\(\$W\$\d+:\$W\$\d+\)", f):
         return statistics.fmean(c["W"] for c in rows.values())
+
+    # =MEDIAN($W$4:$W$1180)
+    if re.fullmatch(r"=MEDIAN\(\$W\$\d+:\$W\$\d+\)", f):
+        return statistics.median(c["W"] for c in rows.values())
+
+    # =MAX($W$4:$W$1180)
+    if re.fullmatch(r"=MAX\(\$W\$\d+:\$W\$\d+\)", f):
+        return float(max(c["W"] for c in rows.values()))
+
+    # =COUNTIF($W...,"<"&AVERAGE($W...))
+    m = re.fullmatch(r'=COUNTIF\(\$W\$\d+:\$W\$\d+,"([<>])"&AVERAGE\(\$W\$\d+:\$W\$\d+\)\)', f)
+    if m:
+        mu = statistics.fmean(c["W"] for c in rows.values())
+        vals = [c["W"] for c in rows.values()]
+        return float(sum(1 for v in vals if (v < mu if m.group(1) == "<" else v > mu)))
 
     # =AVERAGEIFS($W..., <col>,"v" [, <col>,"v"])
     m = re.fullmatch(r"=AVERAGEIFS\(\$W\$\d+:\$W\$\d+,(.*)\)", f)
@@ -85,22 +117,22 @@ def evaluate(f, rows, villa_avgs):
     if m:
         return float(len(_match(rows, CRIT.findall(m.group(1)))))
 
-    # =COUNTIF($AB$4:$AB$178,">"&AVERAGEIFS(...))
-    m = re.fullmatch(r'=COUNTIF\(\$AB\$\d+:\$AB\$\d+,"([<>])"&(AVERAGEIFS\(.*\))\)', f)
+    # =COUNTIF($AB$4:$AB$178,"<"&MEDIAN(IF(...)))   or the AVERAGEIFS form
+    m = re.fullmatch(r'=COUNTIF\(\$AB\$\d+:\$AB\$\d+,"([<>])"&((?:AVERAGEIFS|MEDIAN)\(.*\))\)', f)
     if m:
         target = evaluate("=" + m.group(2), rows, villa_avgs)
         if m.group(1) == ">":
             return float(sum(1 for v in villa_avgs if v > target))
         return float(sum(1 for v in villa_avgs if v < target))
 
-    # =RANK(AVERAGEIFS(...),$AB$4:$AB$178,1)
-    m = re.fullmatch(r"=RANK\((AVERAGEIFS\(.*\)),\$AB\$\d+:\$AB\$\d+,1\)", f)
+    # =RANK(MEDIAN(IF(...)),$AB$4:$AB$178,1)   or the AVERAGEIFS form
+    m = re.fullmatch(r"=RANK\(((?:AVERAGEIFS|MEDIAN)\(.*\)),\$AB\$\d+:\$AB\$\d+,1\)", f)
     if m:
         target = evaluate("=" + m.group(1), rows, villa_avgs)
         return float(sum(1 for v in villa_avgs if v < target) + 1)
 
     # =MEDIAN(IF(($G...="x")*($N...="y"),$W...))
-    m = re.fullmatch(r"=MEDIAN\(IF\(\((.*)\),\$W\$\d+:\$W\$\d+\)\)", f)
+    m = re.fullmatch(r"=MEDIAN\(IF\(\(?(.*?)\)?,\$W\$\d+:\$W\$\d+\)\)", f)
     if m:
         crits = re.findall(r'\$([A-Z]{1,2})\$\d+:\$[A-Z]{1,2}\$\d+="([^"]*)"', m.group(1))
         sel = _match(rows, crits)
@@ -120,7 +152,8 @@ def main():
         if v not in seen:
             seen.add(v)
             order.append(v)
-    villa_avgs = [statistics.fmean(c["W"] for c in rows.values() if c["G"] == v) for v in order]
+    # AB now holds one MEDIAN per villa -- the dashboard ranks on it
+    villa_avgs = [statistics.median(c["W"] for c in rows.values() if c["G"] == v) for v in order]
 
     cases = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8")) if len(sys.argv) > 2 else []
 

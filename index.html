@@ -31,6 +31,7 @@
   --accent:#2a78d6;
   --accent-ink:#1c5cab;
   --accent-wash:#e8f1fd;
+  --series-2:#eb6834;
   --good:#0ca30c;
   --good-wash:#e6f6e6;
   --bad:#d03b3b;
@@ -53,6 +54,7 @@
     --accent:#3987e5;
     --accent-ink:#7cb2f2;
     --accent-wash:#16273c;
+    --series-2:#d95926;
     --good:#3cbb3c;
     --good-wash:#142a16;
     --bad:#e35f5f;
@@ -75,6 +77,7 @@
   --accent:#3987e5;
   --accent-ink:#7cb2f2;
   --accent-wash:#16273c;
+  --series-2:#d95926;
   --good:#3cbb3c;
   --good-wash:#142a16;
   --bad:#e35f5f;
@@ -279,6 +282,31 @@ svg.chart{display:block;width:100%;height:auto}
 .bar-lab{font-family:"IBM Plex Mono",monospace;font-size:11px;fill:var(--ink-2);font-weight:500}
 .mark-lab{font-family:"IBM Plex Mono",monospace;font-size:11px;font-weight:600;fill:var(--accent-ink)}
 
+/* ---------- segmented control ---------- */
+.seg{display:inline-flex;background:var(--sunk);border:1px solid var(--line);border-radius:8px;padding:2px;gap:2px}
+.seg button{
+  background:none;border:0;border-radius:6px;cursor:pointer;color:var(--ink-2);
+  font:inherit;font-size:12.5px;padding:5px 13px;transition:background .15s,color .15s;
+}
+.seg button:hover{color:var(--ink)}
+.seg button[aria-pressed="true"]{background:var(--panel);color:var(--accent-ink);font-weight:600;box-shadow:var(--shadow)}
+
+/* ---------- trend chart ---------- */
+.trend{position:relative}
+.tip{
+  position:absolute;pointer-events:none;opacity:0;transition:opacity .12s;
+  background:var(--panel);border:1px solid var(--line);border-radius:8px;
+  box-shadow:var(--shadow);padding:9px 11px;font-size:12px;min-width:150px;z-index:5;
+}
+.tip.on{opacity:1}
+.tip b{display:block;font-size:12px;margin-bottom:5px;color:var(--ink)}
+.tip .r{display:flex;align-items:center;gap:7px;color:var(--ink-2);line-height:1.65}
+.tip .r i{width:9px;height:9px;border-radius:2px;flex:none}
+.tip .r span{margin-left:auto;font-family:"IBM Plex Mono",monospace;font-weight:600;color:var(--ink)}
+.tip .prov{margin-top:6px;padding-top:6px;border-top:1px solid var(--line-soft);color:var(--bad);font-size:11px;line-height:1.45}
+.caption{font-size:12px;color:var(--ink-3);margin:12px 0 0;line-height:1.6;max-width:78ch}
+.caption b{color:var(--ink-2)}
+
 /* ---------- tables ---------- */
 .tbl-tools{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
 .tbl-tools input{
@@ -382,6 +410,7 @@ footer{max-width:1180px;margin:0 auto;padding:0 24px 40px;font-size:11.5px;color
     last: 3 + TICKETS.length,
     col: { created: "B", category: "D", flat: "G", status: "J", closed: "L", esc: "N", rtat: "R" },
     mins: "W",       // helper column the reader adds
+    bucket: "X",     // helper column: month / week key for the trend chart
     cutoff: "Z$1",   // cell holding the open-ticket cutoff
     uniq: "AA",      // unique villa list
     avg: "AB"        // per-villa average
@@ -463,17 +492,25 @@ footer{max-width:1180px;margin:0 auto;padding:0 24px 40px;font-size:11.5px;color
     SOC.byCat[c] = stats(TICKETS.filter(function (t) { return t.category === c; }));
   });
 
-  /* ranking: 1 = fastest average */
-  var RANKED = FLATS.slice().sort(function (a, b) { return VILLA[a].all.mean - VILLA[b].all.mean; });
-  RANKED.forEach(function (f, i) { VILLA[f].rank = i + 1; });
+  /* Ranking uses the MEDIAN. The mean is 3.6x the median society-wide and is
+     set by a handful of very old tickets, so a mean ranking mostly sorts
+     villas by whether they had one unlucky ticket. See "Why median". */
+  var RANKED = FLATS.slice().sort(function (a, b) { return VILLA[a].all.median - VILLA[b].all.median; });
+  /* Excel's RANK gives tied values the SAME rank, so mirror that here -- the
+     rank badge must agree with the RANK formula published beside it. */
+  RANKED.forEach(function (f, i) {
+    VILLA[f].rank = (i > 0 && VILLA[RANKED[i - 1]].all.median === VILLA[f].all.median)
+      ? VILLA[RANKED[i - 1]].rank
+      : i + 1;
+  });
   var MEDIAN_VILLA = RANKED[Math.floor(RANKED.length / 2)];
   var FASTEST = RANKED[0], SLOWEST = RANKED[RANKED.length - 1];
 
   function standing(f) {
-    var me = VILLA[f].all.mean, longer = 0, shorter = 0, same = 0;
+    var me = VILLA[f].all.median, longer = 0, shorter = 0, same = 0;
     FLATS.forEach(function (o) {
       if (o === f) return;
-      var m = VILLA[o].all.mean;
+      var m = VILLA[o].all.median;
       if (m > me) longer++; else if (m < me) shorter++; else same++;
     });
     return {
@@ -488,6 +525,9 @@ footer{max-width:1180px;margin:0 auto;padding:0 24px 40px;font-size:11.5px;color
   var MR = R(XL.mins);
   var AVGR = "$" + XL.avg + "$" + XL.first + ":$" + XL.avg + "$" + XL.uniqLast;
   var C = XL.col, N1 = XL.first;
+  /* Column B is text ("20-08-26, 08:56 AM"); this turns it into a real date. */
+  var DATE_B = "DATE(2000+VALUE(MID($" + C.created + N1 + ",7,2)),VALUE(MID($" +
+    C.created + N1 + ",4,2)),VALUE(LEFT($" + C.created + N1 + ",2)))";
 
   var F = {
     cutoff: "=DATE(2026,8,20)+TIME(9,30,0)",
@@ -513,28 +553,58 @@ footer{max-width:1180px;margin:0 auto;padding:0 24px 40px;font-size:11.5px;color
       return "=MEDIAN(IF((" + R(C.flat) + '="' + f + '")*(' + R(C.esc) + '="' + k + '"),' + MR + "))";
     },
     socEsc: function (k) { return "=AVERAGEIFS(" + MR + "," + R(C.esc) + ',"' + k + '")'; },
+    socEscMedian: function (k) {
+      return "=MEDIAN(IF(" + R(C.esc) + '="' + k + '",' + MR + "))";
+    },
     villaAll: function (f) { return "=AVERAGEIFS(" + MR + "," + R(C.flat) + ',"' + f + '")'; },
+    /* Excel has no MEDIANIFS, so every median is MEDIAN(IF(...)) -- an array
+       formula (Ctrl+Shift+Enter before Excel 365, plain Enter in 365). */
+    villaMedian: function (f) {
+      return "=MEDIAN(IF(" + R(C.flat) + '="' + f + '",' + MR + "))";
+    },
     socAll: "=AVERAGE(" + MR + ")",
+    socMedian: "=MEDIAN(" + MR + ")",
     uniqList: "=UNIQUE(" + R(C.flat) + ")",
     perVilla: "=AVERAGEIFS(" + MR + "," + R(C.flat) + ",$" + XL.uniq + N1 + ")",
+    perVillaMedian: "=MEDIAN(IF(" + R(C.flat) + "=$" + XL.uniq + N1 + "," + MR + "))",
     longer: function (f) {
-      return "=COUNTIF(" + AVGR + ',">"&AVERAGEIFS(' + MR + "," + R(C.flat) + ',"' + f + '"))';
+      return "=COUNTIF(" + AVGR + ',">"&MEDIAN(IF(' + R(C.flat) + '="' + f + '",' + MR + ")))";
     },
     shorter: function (f) {
-      return "=COUNTIF(" + AVGR + ',"<"&AVERAGEIFS(' + MR + "," + R(C.flat) + ',"' + f + '"))';
+      return "=COUNTIF(" + AVGR + ',"<"&MEDIAN(IF(' + R(C.flat) + '="' + f + '",' + MR + ")))";
     },
     rank: function (f) {
-      return "=RANK(AVERAGEIFS(" + MR + "," + R(C.flat) + ',"' + f + '"),' + AVGR + ",1)";
+      return "=RANK(MEDIAN(IF(" + R(C.flat) + '="' + f + '",' + MR + "))," + AVGR + ",1)";
     },
     cat: function (f, c) {
       return "=AVERAGEIFS(" + MR + "," + R(C.flat) + ',"' + f + '",' + R(C.category) + ',"' + c + '")';
     },
+    catMedian: function (f, c) {
+      return "=MEDIAN(IF((" + R(C.flat) + '="' + f + '")*(' + R(C.category) + '="' + c + '"),' + MR + "))";
+    },
     socCat: function (c) { return "=AVERAGEIFS(" + MR + "," + R(C.category) + ',"' + c + '")'; },
+    socCatMedian: function (c) {
+      return "=MEDIAN(IF(" + R(C.category) + '="' + c + '",' + MR + "))";
+    },
     count: function (f) { return "=COUNTIF(" + R(C.flat) + ',"' + f + '")'; },
     openCount: function (f) {
       return "=COUNTIFS(" + R(C.flat) + ',"' + f + '",' + R(C.closed) + ',"-")';
     },
-    display: "=INT(" + XL.mins + N1 + '/1440)&"d "&INT(MOD(' + XL.mins + N1 + ',1440)/60)&"h"'
+    display: "=INT(" + XL.mins + N1 + '/1440)&"d "&INT(MOD(' + XL.mins + N1 + ',1440)/60)&"h"',
+
+    /* --- trend buckets --- */
+    monthKey: "=TEXT(" + DATE_B + ',"yyyy-mm")',
+    weekKey: "=TEXT(" + DATE_B + "-WEEKDAY(" + DATE_B + ',3),"yyyy-mm-dd")',
+    bucketAvg: function (k) {
+      return "=AVERAGEIFS(" + MR + "," + R(XL.bucket) + ',"' + k + '")';
+    },
+    bucketMedian: function (k) {
+      return "=MEDIAN(IF(" + R(XL.bucket) + '="' + k + '",' + MR + "))";
+    },
+    bucketCount: function (k) { return "=COUNTIF(" + R(XL.bucket) + ',"' + k + '")'; },
+    bucketOpen: function (k) {
+      return "=COUNTIFS(" + R(XL.bucket) + ',"' + k + '",' + R(C.closed) + ',"-")';
+    }
   };
 
   /* ==================== view helpers ==================== */
@@ -586,7 +656,8 @@ footer{max-width:1180px;margin:0 auto;padding:0 24px 40px;font-size:11.5px;color
     peer: null,
     sortKey: "rank",
     sortDir: 1,
-    q: ""
+    q: "",
+    grain: "month"
   };
 
   /* ==================== sections ==================== */
@@ -601,7 +672,7 @@ footer{max-width:1180px;margin:0 auto;padding:0 24px 40px;font-size:11.5px;color
       '<div class="mini"><b>' + v.all.n + "</b><span>Tickets</span></div>" +
       '<div class="mini"><b>' + (v.all.n - v.open) + "</b><span>Closed</span></div>" +
       '<div class="mini"><b>' + v.open + "</b><span>Still open</span></div>" +
-      '<div class="mini"><b>' + dhm(v.all.mean) + "</b><span>Avg resolution</span></div>" +
+      '<div class="mini"><b>' + dhm(v.all.median) + "</b><span>Typical ticket</span></div>" +
       '<div class="mini"><b>#' + v.rank + "</b><span>of " + FLATS.length + " villas</span></div>" +
       "</div></div>";
   }
@@ -615,19 +686,19 @@ footer{max-width:1180px;margin:0 auto;padding:0 24px 40px;font-size:11.5px;color
       body = '<div class="empty"><b>No ' + label.toLowerCase() + " tickets for " + esc(f) + ".</b><br>" +
         "Across the whole society there " + (soc.n === 1 ? "is " : "are ") + soc.n + " " +
         label.toLowerCase() + " ticket" + (soc.n === 1 ? "" : "s") +
-        ", averaging <b>" + dhm(soc.mean) + "</b>.</div>";
+        ", with a typical one taking <b>" + dhm(soc.median) + "</b>.</div>";
     } else {
       body =
-        '<div class="hero"><span class="v">' + days(s.mean) + '</span><span class="u">days average · ' +
-        dhm(s.mean) + "</span></div>" +
-        chip(s.mean, soc.mean) +
-        '<div class="card-sub"><span>Median <b>' + dhm(s.median) + "</b></span>" +
+        '<div class="hero"><span class="v">' + days(s.median) + '</span><span class="u">days for a typical ticket · ' +
+        dhm(s.median) + "</span></div>" +
+        chip(s.median, soc.median) +
+        '<div class="card-sub"><span>Average <b>' + dhm(s.mean) + "</b></span>" +
         "<span>Fastest <b>" + dhm(s.min) + "</b></span>" +
         "<span>Slowest <b>" + dhm(s.max) + "</b></span>" +
         "<span>Tickets <b>" + s.n + "</b></span></div>" +
         bars([
-          { label: esc(f), v: s.mean, cls: "me" },
-          { label: "Society", v: soc.mean, cls: "soc" }
+          { label: esc(f), v: s.median, cls: "me" },
+          { label: "Society", v: soc.median, cls: "soc" }
         ]);
     }
 
@@ -637,17 +708,20 @@ footer{max-width:1180px;margin:0 auto;padding:0 24px 40px;font-size:11.5px;color
       body + "</div>" +
       fx(id + "-" + f,
         "Add the <code>" + XL.mins + "</code> helper column first (see <b>How every number is built</b> at the foot of the page), then:",
-        formula("Average, " + label.toLowerCase() + ", " + f, null, F.villaEsc(f, k)) +
-        formula("Ticket count", null, F.villaEscCount(f, k)) +
-        formula("Median (array formula — Ctrl+Shift+Enter on older Excel)", null, F.villaEscMedian(f, k)) +
-        formula("Society average for comparison", null, F.socEsc(k))) +
+        formula("Median — the headline figure (array formula: Ctrl+Shift+Enter before Excel 365)",
+          null, F.villaEscMedian(f, k)) +
+        formula("Society median, for the comparison bar", null, F.socEscMedian(k)) +
+        formula("Average, shown underneath", null, F.villaEsc(f, k)) +
+        formula("Ticket count", null, F.villaEscCount(f, k))) +
       "</div>";
   }
 
   function secEscalation(f) {
     return '<div class="panel"><div class="panel-h"><div>' +
-      '<h2>Average resolution time by escalation level</h2>' +
-      "<p>How long tickets from " + esc(f) + " take to close, split by how the help desk classified them. " +
+      '<h2>Resolution time by escalation level</h2>' +
+      "<p>The headline figure is the <b>median</b> &mdash; what a typical ticket from " + esc(f) +
+      " actually takes. The average sits underneath it, and " +
+      '<a href="#why-median" style="color:var(--accent-ink)">why that order matters</a> is explained below. ' +
       "Lower is better.</p></div></div>" +
       '<div class="panel-b"><div class="cards">' +
       ESC_KEYS.map(function (k) { return escCard(f, k); }).join("") +
@@ -657,12 +731,12 @@ footer{max-width:1180px;margin:0 auto;padding:0 24px 40px;font-size:11.5px;color
   /* ---- distribution of all villa averages, with this villa marked ---- */
   function histogram(f) {
     var W = 900, H = 210, PL = 44, PR = 16, PT = 14, PB = 34;
-    var BIN = 2, MAXD = 30;                       // 2-day bins to 30d, then overflow
+    var BIN = 1, MAXD = 14;                       // 1-day bins to 14d, then overflow
     var nb = MAXD / BIN + 1;
     var binsArr = new Array(nb).fill(0);
     var mineBin = 0;
     FLATS.forEach(function (o) {
-      var d = VILLA[o].all.mean / 1440;
+      var d = VILLA[o].all.median / 1440;
       var i = d >= MAXD ? nb - 1 : Math.floor(d / BIN);
       binsArr[i]++;
       if (o === f) mineBin = i;
@@ -684,17 +758,17 @@ footer{max-width:1180px;margin:0 auto;padding:0 24px 40px;font-size:11.5px;color
       return '<rect x="' + x + '" y="' + y + '" width="' + (iw - 4) + '" height="' + Math.max(h, c ? 2 : 0) +
         '" rx="3" fill="' + (mine ? "var(--accent)" : "var(--neutral-mark)") +
         '" opacity="' + (mine ? 1 : 0.55) + '"><title>' +
-        (i === nb - 1 ? "30+ days" : i * BIN + "–" + (i + 1) * BIN + " days") +
+        (i === nb - 1 ? MAXD + "+ days" : i * BIN + "–" + (i + 1) * BIN + " days") +
         ": " + c + " villa" + (c === 1 ? "" : "s") + "</title></rect>";
     }).join("");
 
     var ax = "";
     for (var i = 0; i < nb; i += 2) {
       ax += '<text class="axis-l" x="' + (PL + i * iw + iw / 2) + '" y="' + (H - PB + 16) +
-        '" text-anchor="middle">' + (i === nb - 1 ? "30+" : i * BIN) + "</text>";
+        '" text-anchor="middle">' + (i === nb - 1 ? MAXD + "+" : i * BIN) + "</text>";
     }
     ax += '<text class="axis-l" x="' + (PL + (W - PL - PR) / 2) + '" y="' + (H - 3) +
-      '" text-anchor="middle">Average resolution time (days)</text>';
+      '" text-anchor="middle">Median resolution time (days)</text>';
 
     var mx = PL + mineBin * iw + iw / 2;
     var mark = '<line x1="' + mx + '" y1="' + (PT - 6) + '" x2="' + mx + '" y2="' + (PT + ih) +
@@ -705,7 +779,7 @@ footer{max-width:1180px;margin:0 auto;padding:0 24px 40px;font-size:11.5px;color
     return '<div class="legend"><span><i style="background:var(--accent)"></i>' + esc(f) + " (your villa)</span>" +
       '<span><i style="background:var(--neutral-mark);opacity:.55"></i>Other villas</span></div>' +
       '<div class="chart-wrap"><svg class="chart" viewBox="0 0 ' + W + " " + H +
-      '" role="img" aria-label="Distribution of average resolution time across all villas">' +
+      '" role="img" aria-label="Distribution of median resolution time across all villas">' +
       g + b + mark + ax + "</svg></div>";
   }
 
@@ -713,7 +787,7 @@ footer{max-width:1180px;margin:0 auto;padding:0 24px 40px;font-size:11.5px;color
     var st = standing(f), v = VILLA[f];
     return '<div class="panel"><div class="panel-h"><div>' +
       "<h2>How " + esc(f) + " compares with every other villa</h2>" +
-      "<p>All " + FLATS.length + " villas ranked by their own average resolution time across every ticket they raised.</p>" +
+      "<p>All " + FLATS.length + " villas ranked by their <b>median</b> resolution time across every ticket they raised.</p>" +
       "</div></div>" +
       '<div class="panel-b">' +
       '<div class="cards" style="margin-bottom:22px">' +
@@ -728,19 +802,22 @@ footer{max-width:1180px;margin:0 auto;padding:0 24px 40px;font-size:11.5px;color
       '<div class="hero"><span class="v">' + st.shorter + '</span><span class="u">of ' + (st.total - 1) +
       " other villas resolve quicker</span></div>" +
       '<div class="card-sub"><span>Overall rank <b>#' + st.rank + "</b> of " + st.total +
-      " · average <b>" + dhm(v.all.mean) + "</b></span></div>" +
+      " · typical ticket <b>" + dhm(v.all.median) + "</b> · average <b>" + dhm(v.all.mean) +
+      "</b></span></div>" +
       "</div></div>" +
       "</div>" +
       histogram(f) +
       "</div>" +
       fx("fx-standing-" + f,
-        "First build a per-villa average table: put <code>" + F.uniqList + "</code> in <code>" + XL.uniq + XL.first +
-        "</code> to list every villa, and <code>" + esc(F.perVilla) + "</code> in <code>" + XL.avg + XL.first +
-        "</code> filled down to row " + XL.uniqLast + ". Then:",
+        "First build a per-villa median table: put <code>" + F.uniqList + "</code> in <code>" + XL.uniq + XL.first +
+        "</code> to list every villa, then array-enter <code>" + esc(F.perVillaMedian) + "</code> in <code>" +
+        XL.avg + XL.first + "</code> and fill down to row " + XL.uniqLast +
+        ". (Excel has no MEDIANIFS, so medians use MEDIAN(IF(...)) &mdash; Ctrl+Shift+Enter before Excel 365.) Then:",
+        formula("Per-villa median — fill down", XL.avg + XL.first, F.perVillaMedian) +
         formula("Villas that take LONGER than " + f, null, F.longer(f)) +
         formula("Villas that are FASTER than " + f, null, F.shorter(f)) +
         formula("Rank of " + f + " (1 = fastest)", null, F.rank(f)) +
-        formula("This villa's own average", null, F.villaAll(f))) +
+        formula("This villa's own median", null, F.villaMedian(f))) +
       "</div>";
   }
 
@@ -761,7 +838,7 @@ footer{max-width:1180px;margin:0 auto;padding:0 24px 40px;font-size:11.5px;color
 
     var opts = FLATS.filter(function (x) { return x !== f; }).map(function (x) {
       return '<option value="' + esc(x) + '"' + (x === peer ? " selected" : "") + ">" +
-        esc(x) + " — " + dhm(VILLA[x].all.mean) + " avg</option>";
+        esc(x) + " — " + dhm(VILLA[x].all.median) + " typical</option>";
     }).join("");
 
     return '<div class="panel"><div class="panel-h"><div>' +
@@ -773,10 +850,10 @@ footer{max-width:1180px;margin:0 auto;padding:0 24px 40px;font-size:11.5px;color
       opts + "</select></div></div>" +
       '<div class="panel-b"><div class="tbl-scroll" style="max-height:none"><table>' +
       "<thead><tr><th>Measure</th><th>" + esc(f) + "</th><th>" + esc(peer) + "</th></tr></thead><tbody>" +
+      row("Typical ticket (median)", a.all.median, b.all.median, true) +
       row("Average resolution", a.all.mean, b.all.mean, true) +
-      row("Median resolution", a.all.median, b.all.median, true) +
-      row("Urgent average", a["Level-1"].mean, b["Level-1"].mean, true) +
-      row("Usual average", a["NA"].mean, b["NA"].mean, true) +
+      row("Urgent median", a["Level-1"].median, b["Level-1"].median, true) +
+      row("Usual median", a["NA"].median, b["NA"].median, true) +
       row("Fastest ticket", a.all.min, b.all.min, true) +
       row("Slowest ticket", a.all.max, b.all.max, true) +
       row("Tickets raised", a.all.n, b.all.n, false) +
@@ -785,9 +862,10 @@ footer{max-width:1180px;margin:0 auto;padding:0 24px 40px;font-size:11.5px;color
       "</tbody></table></div></div>" +
       fx("fx-h2h-" + f + "-" + peer,
         "Swap the villa name in the criteria to compare any two villas.",
+        formula("Median for " + f, null, F.villaMedian(f)) +
+        formula("Median for " + peer, null, F.villaMedian(peer)) +
         formula("Average for " + f, null, F.villaAll(f)) +
-        formula("Average for " + peer, null, F.villaAll(peer)) +
-        formula("Urgent average for " + f, null, F.villaEsc(f, "Level-1")) +
+        formula("Urgent median for " + f, null, F.villaEscMedian(f, "Level-1")) +
         formula("Tickets raised by " + f, null, F.count(f)) +
         formula("Still-open tickets for " + f, null, F.openCount(f))) +
       "</div>";
@@ -796,11 +874,8 @@ footer{max-width:1180px;margin:0 auto;padding:0 24px 40px;font-size:11.5px;color
   /* ---- category breakdown, villa vs society ---- */
   function secCategories(f) {
     var v = VILLA[f];
-    var cats = Object.keys(v.byCat).sort(function (a, b) { return v.byCat[b].mean - v.byCat[a].mean; });
+    var cats = Object.keys(v.byCat).sort(function (a, b) { return v.byCat[b].median - v.byCat[a].median; });
     if (!cats.length) return "";
-    var max = Math.max.apply(null, cats.map(function (c) {
-      return Math.max(v.byCat[c].mean, SOC.byCat[c].mean);
-    }));
 
     var rows = cats.map(function (c) {
       var mine = v.byCat[c], soc = SOC.byCat[c];
@@ -808,18 +883,18 @@ footer{max-width:1180px;margin:0 auto;padding:0 24px 40px;font-size:11.5px;color
         '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;gap:12px;flex-wrap:wrap">' +
         '<b style="font-size:13px">' + esc(catLabel(c)) + '</b>' +
         '<span style="font-size:11.5px;color:var(--ink-3)">' + mine.n + " ticket" + (mine.n === 1 ? "" : "s") +
-        " · " + esc(f) + " <b class=\"num\" style=\"color:var(--ink)\">" + dhm(mine.mean) +
-        "</b> vs society <b class=\"num\" style=\"color:var(--ink)\">" + dhm(soc.mean) + "</b></span></div>" +
+        " · " + esc(f) + " <b class=\"num\" style=\"color:var(--ink)\">" + dhm(mine.median) +
+        "</b> vs society <b class=\"num\" style=\"color:var(--ink)\">" + dhm(soc.median) + "</b></span></div>" +
         bars([
-          { label: esc(f), v: mine.mean, cls: "me" },
-          { label: "Society", v: soc.mean, cls: "soc" }
+          { label: esc(f), v: mine.median, cls: "me" },
+          { label: "Society", v: soc.median, cls: "soc" }
         ]).replace('class="cmp"', 'class="cmp" style="gap:5px"') +
         "</div>";
     }).join("");
 
     return '<div class="panel"><div class="panel-h"><div>' +
       "<h2>Which kinds of problems take longest</h2>" +
-      "<p>" + esc(f) + "&rsquo;s average resolution time per category, against the society average for the same category.</p>" +
+      "<p>" + esc(f) + "&rsquo;s median resolution time per category, against the society median for the same category.</p>" +
       "</div></div><div class=\"panel-b\">" + rows + "</div>" +
       fx("fx-cat-" + f,
         "One pair of formulas per category. " + (cats.some(hasPadding)
@@ -828,9 +903,289 @@ footer{max-width:1180px;margin:0 auto;padding:0 24px 40px;font-size:11.5px;color
             "retyping the name without it makes Excel match nothing."
           : "The criteria match the category text exactly as the sheet stores it."),
         cats.map(function (c) {
-          return formula(catLabel(c) + " — " + f, null, F.cat(f, c)) +
-            formula(catLabel(c) + " — society", null, F.socCat(c));
+          return formula(catLabel(c) + " — " + f + " (median)", null, F.catMedian(f, c)) +
+            formula(catLabel(c) + " — society (median)", null, F.socCatMedian(c));
         }).join("")) +
+      "</div>";
+  }
+
+  /* ---- society-wide resolution trend over the whole period ---- */
+
+  /* A bucket is "provisional" once this share of its tickets are still open:
+     those are aged only to the cutoff, so the bucket understates reality. */
+  var PROVISIONAL_AT = 0.10;
+
+  /* Round a raw axis step up to 1/2/2.5/5/10 x a power of ten, so tick labels
+     read 0d 5d 10d rather than 0d 3.75d 7.5d. */
+  function niceStep(raw) {
+    if (!(raw > 0)) return 1;
+    var mag = Math.pow(10, Math.floor(Math.log(raw) / Math.LN10));
+    var norm = raw / mag;
+    var pick = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 2.5 ? 2.5 : norm <= 5 ? 5 : 10;
+    return pick * mag;
+  }
+
+  function monthKey(iso) { return iso.slice(0, 7); }
+  function weekKey(iso) {
+    var d = new Date(iso.slice(0, 10) + "T00:00:00");
+    d.setDate(d.getDate() - ((d.getDay() + 6) % 7));   // back to Monday
+    return d.toISOString().slice(0, 10);
+  }
+  function monthLabel(k) {
+    return new Date(k + "-01T00:00:00").toLocaleDateString("en-GB", { month: "short", year: "2-digit" });
+  }
+  function weekLabel(k) {
+    return new Date(k + "T00:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+  }
+
+  function trendSeries(grain) {
+    var keyOf = grain === "week" ? weekKey : monthKey;
+    var buckets = {};
+    TICKETS.forEach(function (t) {
+      var k = keyOf(t.created);
+      (buckets[k] || (buckets[k] = { key: k, mins: [], open: 0 }));
+      buckets[k].mins.push(t.mins);
+      if (t.open) buckets[k].open++;
+    });
+    return Object.keys(buckets).sort().map(function (k) {
+      var b = buckets[k], s = stats(b.mins.map(function (m) { return { mins: m }; }));
+      return {
+        key: k,
+        label: grain === "week" ? weekLabel(k) : monthLabel(k),
+        n: b.mins.length,
+        open: b.open,
+        mean: s.mean,
+        median: s.median,
+        provisional: b.open / b.mins.length >= PROVISIONAL_AT
+      };
+    });
+  }
+
+  function trendChart(pts) {
+    var W = 900, PL = 54, PR = 20, PT = 16;
+    var IH = 168, GAP = 30, VH = 52, PB = 30;
+    var H = PT + IH + GAP + VH + PB;
+    var n = pts.length, iw = (W - PL - PR) / n;
+    var xAt = function (i) { return PL + iw * (i + 0.5); };
+
+    var maxD = Math.max.apply(null, pts.map(function (p) { return Math.max(p.mean, p.median) / 1440; }));
+    var step = niceStep(maxD / 4);
+    var top = Math.max(Math.ceil(maxD / step) * step, step);
+    var ticks = Math.round(top / step);
+    var yAt = function (d) { return PT + IH - (d / top) * IH; };
+    var maxN = Math.max.apply(null, pts.map(function (p) { return p.n; }));
+    var vy = PT + IH + GAP;
+
+    var svg = "";
+
+    /* shaded band behind provisional buckets */
+    var firstProv = pts.findIndex(function (p) { return p.provisional; });
+    if (firstProv >= 0) {
+      var bx = xAt(firstProv) - iw / 2;
+      svg += '<rect x="' + bx + '" y="' + PT + '" width="' + (W - PR - bx) + '" height="' + (IH + GAP + VH) +
+        '" fill="var(--bad)" opacity="0.05"/>' +
+        '<line x1="' + bx + '" y1="' + PT + '" x2="' + bx + '" y2="' + (vy + VH) +
+        '" stroke="var(--bad)" stroke-width="1" stroke-dasharray="3 3" opacity="0.5"/>';
+    }
+
+    /* y grid + labels */
+    for (var g = 0; g <= ticks; g++) {
+      var d = step * g, y = yAt(d);
+      svg += '<line class="grid-l" x1="' + PL + '" y1="' + y + '" x2="' + (W - PR) + '" y2="' + y + '"/>' +
+        '<text class="axis-l" x="' + (PL - 9) + '" y="' + (y + 3.5) + '" text-anchor="end">' +
+        (Math.round(d * 10) / 10) + "d</text>";
+    }
+
+    /* volume bars (own plot area, shared x -- never a second y-axis on the line chart) */
+    pts.forEach(function (p, i) {
+      var h = maxN ? (p.n / maxN) * VH : 0;
+      svg += '<rect x="' + (xAt(i) - iw / 2 + 3) + '" y="' + (vy + VH - h) + '" width="' + (iw - 6) +
+        '" height="' + Math.max(h, 1) + '" rx="2.5" fill="var(--neutral-mark)" opacity="' +
+        (p.provisional ? 0.35 : 0.6) + '"/>';
+    });
+    svg += '<line class="grid-l" x1="' + PL + '" y1="' + (vy + VH) + '" x2="' + (W - PR) + '" y2="' + (vy + VH) + '"/>' +
+      '<text class="axis-l" x="' + (PL - 9) + '" y="' + (vy + 10) + '" text-anchor="end">' + maxN + "</text>" +
+      '<text class="axis-l" x="' + (PL - 9) + '" y="' + (vy + VH) + '" text-anchor="end">0</text>' +
+      '<text class="axis-l" x="' + PL + '" y="' + (vy - 9) + '">Tickets raised</text>';
+
+    /* the two lines: solid through settled buckets, dashed once provisional */
+    [
+      { k: "median", c: "var(--accent)", name: "Median" },
+      { k: "mean", c: "var(--series-2)", name: "Average" }
+    ].forEach(function (s) {
+      var solid = [], dashed = [];
+      pts.forEach(function (p, i) {
+        var pt = [xAt(i), yAt(p[s.k] / 1440)];
+        if (p.provisional) {
+          if (!dashed.length && i > 0) dashed.push([xAt(i - 1), yAt(pts[i - 1][s.k] / 1440)]);
+          dashed.push(pt);
+        } else solid.push(pt);
+      });
+      var d2 = function (a) { return a.map(function (q, i) { return (i ? "L" : "M") + q[0] + " " + q[1]; }).join(" "); };
+      if (solid.length > 1) svg += '<path d="' + d2(solid) + '" fill="none" stroke="' + s.c + '" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
+      if (dashed.length > 1) svg += '<path d="' + d2(dashed) + '" fill="none" stroke="' + s.c + '" stroke-width="2" stroke-dasharray="5 4" stroke-linecap="round"/>';
+      pts.forEach(function (p, i) {
+        svg += '<circle cx="' + xAt(i) + '" cy="' + yAt(p[s.k] / 1440) + '" r="4" fill="' +
+          (p.provisional ? "var(--panel)" : s.c) + '" stroke="' + s.c + '" stroke-width="2"/>';
+      });
+      /* direct label on the final point */
+      var last = pts[pts.length - 1];
+      svg += '<text class="bar-lab" x="' + (xAt(n - 1) + 9) + '" y="' + (yAt(last[s.k] / 1440) + 4) +
+        '" fill="' + s.c + '" text-anchor="end" opacity="0">' + s.name + "</text>";
+    });
+
+    /* x labels, thinned so they never collide */
+    var step = Math.ceil(n / 12);
+    pts.forEach(function (p, i) {
+      if (i % step && i !== n - 1) return;
+      svg += '<text class="axis-l" x="' + xAt(i) + '" y="' + (H - 10) + '" text-anchor="middle">' + esc(p.label) + "</text>";
+    });
+
+    /* hover bands */
+    pts.forEach(function (p, i) {
+      svg += '<rect data-band="' + i + '" x="' + (xAt(i) - iw / 2) + '" y="' + PT + '" width="' + iw +
+        '" height="' + (IH + GAP + VH) + '" fill="transparent" style="cursor:crosshair"/>';
+    });
+
+    return '<div class="chart-wrap"><svg class="chart" viewBox="0 0 ' + W + " " + H +
+      '" role="img" aria-label="Average and median resolution time for the whole society over time">' +
+      svg + "</svg></div>";
+  }
+
+  function secTrend() {
+    var grain = S.grain;
+    var pts = trendSeries(grain);
+    var first = pts[0], last = pts[pts.length - 1];
+    var settled = pts.filter(function (p) { return !p.provisional; });
+    var lastSettled = settled[settled.length - 1];
+    var provCount = pts.length - settled.length;
+
+    var change = first.median && lastSettled
+      ? ((lastSettled.median - first.median) / first.median) * 100 : null;
+
+    var dir = change == null ? "" : change < 0 ? "faster" : "slower";
+
+    return '<div class="panel"><div class="panel-h"><div>' +
+      "<h2>Resolution time across the whole period</h2>" +
+      "<p>Every ticket in the society, grouped by when it was raised. The gap between the two lines " +
+      "is the skew: the average runs well above the median because a few very old tickets drag it up.</p></div>" +
+      '<div style="margin-left:auto"><span class="eyebrow" style="display:block;margin-bottom:4px">Group by</span>' +
+      '<span class="seg" role="group" aria-label="Group by">' +
+      '<button type="button" data-grain="month" aria-pressed="' + (grain === "month") + '">Monthly</button>' +
+      '<button type="button" data-grain="week" aria-pressed="' + (grain === "week") + '">Weekly</button>' +
+      "</span></div></div>" +
+      '<div class="panel-b">' +
+      '<div class="legend">' +
+      '<span><i style="background:var(--accent)"></i>Median &mdash; a typical ticket</span>' +
+      '<span><i style="background:var(--series-2)"></i>Average &mdash; pulled up by the slowest tickets</span>' +
+      '<span><i style="background:var(--neutral-mark);opacity:.6"></i>Tickets raised</span>' +
+      (provCount ? '<span><i style="background:var(--bad);opacity:.25"></i>Still settling</span>' : "") +
+      "</div>" +
+      '<div class="trend">' + trendChart(pts) + '<div class="tip" id="trendTip"></div></div>' +
+      (change == null ? "" :
+        '<p class="caption">Between <b>' + esc(first.label) + "</b> and <b>" + esc(lastSettled.label) +
+        "</b> a typical ticket moved from <b>" + dhm(first.median) + "</b> to <b>" + dhm(lastSettled.median) +
+        "</b> &mdash; " + Math.abs(Math.round(change)) + "% " + dir + ". Over the same span the average " +
+        "went from <b>" + dhm(first.mean) + "</b> to <b>" + dhm(lastSettled.mean) + "</b>.</p>") +
+      (provCount
+        ? '<p class="caption"><b>The shaded ' +
+          (provCount === 1 ? "bucket on the right is" : provCount + " buckets on the right are") +
+          " still settling.</b> " +
+          (provCount === 1 ? "It still contains tickets" : "They still contain tickets") +
+          " that have not been closed, and an open ticket can only be measured up to the cutoff of " +
+          "20 Aug 2026, 9:30 AM. " +
+          (provCount === 1 ? "Its true average" : "Their true averages") +
+          " will settle higher than plotted, so read " +
+          (provCount === 1 ? "that last point" : "the final stretch") +
+          " as a floor rather than a result.</p>"
+          : "") +
+      "</div>" +
+      fx("fx-trend-" + grain,
+        "Add one more helper column for the time bucket, then average the <code>" + XL.mins +
+        "</code> column within each bucket. " + (grain === "week"
+          ? "The week key is the Monday that starts the week."
+          : "The month key is the year and month the ticket was raised."),
+        formula(grain === "week" ? "Week bucket — fill down" : "Month bucket — fill down",
+          XL.bucket + XL.first, grain === "week" ? F.weekKey : F.monthKey) +
+        formula("Median for one bucket (" + last.key + ") — the blue line", null, F.bucketMedian(last.key)) +
+        formula("Average for that bucket — the orange line", null, F.bucketAvg(last.key)) +
+        formula("Tickets raised in that bucket", null, F.bucketCount(last.key)) +
+        formula("Still-open tickets in it (what makes a bucket provisional)", null, F.bucketOpen(last.key))) +
+      "</div>";
+  }
+
+  /* ---- why the median leads, argued from this dataset ---- */
+  function secWhyMedian() {
+    var all = TICKETS.map(function (t) { return t.mins; });
+    var mean = SOC.all.mean, median = SOC.all.median;
+    var below = all.filter(function (m) { return m < mean; }).length;
+    var pctBelow = Math.round((below / all.length) * 100);
+    var ratio = (mean / median).toFixed(1);
+
+    /* how differently the two measures rank the same villas */
+    var byMean = FLATS.slice().sort(function (a, b) { return VILLA[a].all.mean - VILLA[b].all.mean; });
+    var meanRank = {};
+    byMean.forEach(function (f, i) { meanRank[f] = i + 1; });
+    var moved = FLATS.map(function (f) {
+      return { flat: f, move: Math.abs(meanRank[f] - VILLA[f].rank), byMean: meanRank[f], byMedian: VILLA[f].rank };
+    }).sort(function (a, b) { return b.move - a.move; });
+    var big = moved.filter(function (m) { return m.move > 20; }).length;
+    var top = moved[0];
+
+    /* the tail the median cannot see */
+    var worst = TICKETS.slice().sort(function (a, b) { return b.mins - a.mins; })[0];
+
+    return '<div class="panel" id="why-median"><div class="panel-h"><div>' +
+      "<h2>Why the median leads, and where it misleads</h2>" +
+      "<p>The choice of headline number changes who looks good, so it is worth stating plainly.</p>" +
+      "</div></div><div class=\"panel-b\">" +
+
+      '<div class="cards" style="margin-bottom:20px">' +
+      '<div class="card"><div class="card-top">' +
+      '<div class="card-tag"><span class="dot usual"></span><b>A typical ticket</b><code>median</code></div>' +
+      '<div class="hero"><span class="v">' + days(median) + '</span><span class="u">days · ' + dhm(median) + "</span></div>" +
+      '<div class="card-sub"><span>Half of all ' + all.length + " tickets closed faster than this</span></div>" +
+      "</div></div>" +
+      '<div class="card"><div class="card-top">' +
+      '<div class="card-tag"><span class="dot urgent"></span><b>The arithmetic average</b><code>mean</code></div>' +
+      '<div class="hero"><span class="v">' + days(mean) + '</span><span class="u">days · ' + dhm(mean) + "</span></div>" +
+      '<div class="card-sub"><span><b>' + pctBelow + "%</b> of tickets were faster than this &mdash; " +
+      "it describes almost nobody</span></div>" +
+      "</div></div></div>" +
+
+      '<div class="meth">' +
+      "<section><h3>The average is " + ratio + "&times; the median</h3><p>Resolution times are not " +
+      "symmetric. Most tickets close quickly and a small number run for weeks, and those few drag the " +
+      "mean upward without describing anyone&rsquo;s actual experience. The slowest single ticket in " +
+      "this export &mdash; " + esc(worst.flat) + ", " + esc(catLabel(worst.category)) + " &mdash; took <b>" +
+      dhm(worst.mins) + "</b>. One ticket like that lifts a villa&rsquo;s average for the whole period.</p></section>" +
+
+      "<section><h3>It changes the league table</h3><p>Ranking by mean instead of median moves <b>" + big +
+      "</b> of the " + FLATS.length + " villas by more than twenty places. " + esc(top.flat) +
+      " is the clearest case: <b>#" + top.byMean + "</b> by average, <b>#" + top.byMedian +
+      "</b> by median. The average was largely ranking villas by whether they happened to get one " +
+      "unlucky ticket, not by the service they usually receive.</p></section>" +
+
+      "<section><h3>Where the median misleads</h3><p>The median hides the tail, and the tail is real. " +
+      "A villa with nine quick tickets and one that dragged on for two months has a healthy median and " +
+      "a genuine grievance. That is why every card here also shows the average and the slowest ticket, " +
+      "and why the league table keeps a <b>Slowest ticket</b> column. Read the median for the routine " +
+      "case and the slowest for the worst case &mdash; neither number alone is the whole story.</p></section>" +
+
+      "<section><h3>What is not being done</h3><p>No outliers are removed, no ticket is weighted more " +
+      "than another, and nothing is smoothed. The median and the mean are both computed over exactly " +
+      "the same set of rows, so the gap between them is a property of the data rather than of the " +
+      "method.</p></section>" +
+      "</div></div>" +
+
+      fx("fx-why-median",
+        "Both measures over every ticket, so you can see the gap yourself. The median is an array " +
+        "formula &mdash; Ctrl+Shift+Enter before Excel 365.",
+        formula("Society median", null, F.socMedian) +
+        formula("Society average", null, F.socAll) +
+        formula("How many tickets beat the average", null,
+          "=COUNTIF(" + MR + ',"<"&AVERAGE(' + MR + "))") +
+        formula("The slowest single ticket", null, "=MAX(" + MR + ")")) +
       "</div>";
   }
 
@@ -840,18 +1195,19 @@ footer{max-width:1180px;margin:0 auto;padding:0 24px 40px;font-size:11.5px;color
     { k: "flat", t: "Villa", n: false },
     { k: "n", t: "Tickets", n: true },
     { k: "open", t: "Open", n: true },
-    { k: "urgent", t: "Urgent avg", n: true },
-    { k: "usual", t: "Usual avg", n: true },
-    { k: "mean", t: "Overall avg", n: true },
-    { k: "median", t: "Median", n: true }
+    { k: "median", t: "Typical (median)", n: true },
+    { k: "urgent", t: "Urgent median", n: true },
+    { k: "usual", t: "Usual median", n: true },
+    { k: "mean", t: "Average", n: true },
+    { k: "max", t: "Slowest ticket", n: true }
   ];
 
   function rowVals(f) {
     var v = VILLA[f];
     return {
       rank: v.rank, flat: f, n: v.all.n, open: v.open,
-      urgent: v["Level-1"].mean, usual: v["NA"].mean,
-      mean: v.all.mean, median: v.all.median
+      urgent: v["Level-1"].median, usual: v["NA"].median,
+      mean: v.all.mean, median: v.all.median, max: v.all.max
     };
   }
 
@@ -880,29 +1236,33 @@ footer{max-width:1180px;margin:0 auto;padding:0 24px 40px;font-size:11.5px;color
         '<td class="n">' + esc(r.flat) + "</td>" +
         '<td class="n">' + r.n + "</td>" +
         '<td class="n">' + (r.open || "—") + "</td>" +
+        '<td class="n">' + dhm(r.median) + "</td>" +
         '<td class="n">' + dhm(r.urgent) + "</td>" +
         '<td class="n">' + dhm(r.usual) + "</td>" +
         '<td class="n">' + dhm(r.mean) + "</td>" +
-        '<td class="n">' + dhm(r.median) + "</td></tr>";
+        '<td class="n">' + dhm(r.max) + "</td></tr>";
     }).join("");
 
     return '<div class="panel"><div class="panel-h"><div>' +
       "<h2>Every villa, ranked</h2>" +
-      "<p>Sort by any column, or search for a neighbour. Click a row to open that villa. " +
-      "Society average is <b>" + dhm(SOC.all.mean) + "</b>; the median villa (" + esc(MEDIAN_VILLA) +
-      ") averages <b>" + dhm(VILLA[MEDIAN_VILLA].all.mean) + "</b>.</p></div></div>" +
+      "<p>Ranked by median. Sort by any column, or search for a neighbour; click a row to open that villa. " +
+      "The <b>Slowest ticket</b> column is deliberately kept in view &mdash; a good median can still hide " +
+      "one very bad ticket.</p></div></div>" +
       '<div class="panel-b">' +
       '<div class="tbl-tools"><input id="tblQ" type="search" placeholder="Search villa…" value="' + esc(S.q) + '">' +
-      '<span class="tbl-note">' + list.length + " of " + FLATS.length + " villas · fastest " +
-      esc(FASTEST) + " (" + dhm(VILLA[FASTEST].all.mean) + ") · slowest " +
-      esc(SLOWEST) + " (" + dhm(VILLA[SLOWEST].all.mean) + ")</span></div>" +
+      '<span class="tbl-note">' + list.length + " of " + FLATS.length + " villas · society median " +
+      dhm(SOC.all.median) + " · fastest " + esc(FASTEST) + " (" + dhm(VILLA[FASTEST].all.median) +
+      ") · slowest " + esc(SLOWEST) + " (" + dhm(VILLA[SLOWEST].all.median) + ")</span></div>" +
       '<div class="tbl-scroll"><table><thead><tr>' + head + "</tr></thead><tbody>" + body + "</tbody></table></div>" +
       "</div>" +
       fx("fx-table",
-        "Build the whole league table in two columns, then sort it:",
+        "Build the whole league table in three columns, then sort it. The median column is an " +
+        "array formula &mdash; Ctrl+Shift+Enter before Excel 365, plain Enter in 365.",
         formula("List every villa once", XL.uniq + XL.first, F.uniqList) +
-        formula("Average for that villa (fill down to row " + XL.uniqLast + ")", XL.avg + XL.first, F.perVilla) +
+        formula("Median for that villa (fill down to row " + XL.uniqLast + ")", XL.avg + XL.first, F.perVillaMedian) +
         formula("Rank it", "AC" + XL.first, "=RANK($" + XL.avg + XL.first + "," + AVGR + ",1)") +
+        formula("Average for that villa, for the last column", "AD" + XL.first, F.perVilla) +
+        formula("Society median, all tickets", null, F.socMedian) +
         formula("Society average, all tickets", null, F.socAll)) +
       "</div>";
   }
@@ -967,9 +1327,13 @@ footer{max-width:1180px;margin:0 auto;padding:0 24px 40px;font-size:11.5px;color
       '<ul class="drop">' + META.droppedColumns.map(function (c) { return "<li>" + esc(c) + "</li>"; }).join("") +
       "</ul></section>" +
 
-      "<section><h3>6. Averages</h3><p>Every average is a plain arithmetic mean of the helper column over the " +
-      "matching rows &mdash; <code>AVERAGEIFS</code>, no weighting and no outlier removal. Medians are shown " +
-      "alongside because a few very old tickets pull the mean up.</p></section>" +
+      "<section><h3>6. Median first, average alongside</h3><p>The headline figure everywhere on this page " +
+      "is the <b>median</b>, because the average runs " + (SOC.all.mean / SOC.all.median).toFixed(1) +
+      "&times; higher and describes almost no real ticket. The average is still shown next to it, and " +
+      "rankings use the median. Neither is weighted and no outlier is removed &mdash; see " +
+      '<a href="#why-median" style="color:var(--accent-ink)">Why the median leads</a>. ' +
+      "Excel has no <code>MEDIANIFS</code>, so every median here is <code>MEDIAN(IF(...))</code>, entered " +
+      "as an array formula.</p></section>" +
       "</div></div>" +
       fx("fx-method",
         "Add these two cells to the sheet, then fill <code>" + XL.mins + XL.first + "</code> down to row " +
@@ -991,7 +1355,8 @@ footer{max-width:1180px;margin:0 auto;padding:0 24px 40px;font-size:11.5px;color
     return '<div class="panel"><div class="blank"><b>Search for your villa to begin</b>' +
       "Type a villa number above &mdash; for example <b>75</b> or <b>Villa-75</b>.<br>" +
       "This report covers " + META.total + " tickets from " + FLATS.length + " villas, raised between " +
-      dt(META.rangeStart) + " and " + dt(META.rangeEnd) + ".</div></div>" + secTable(null) + secMethod();
+      dt(META.rangeStart) + " and " + dt(META.rangeEnd) + ".</div></div>" +
+      secTrend() + secWhyMedian() + secTable(null) + secMethod();
   }
 
   /* ==================== render ==================== */
@@ -1002,7 +1367,7 @@ footer{max-width:1180px;margin:0 auto;padding:0 24px 40px;font-size:11.5px;color
     var f = S.flat;
     app.innerHTML = f
       ? secIdentity(f) + secEscalation(f) + secStanding(f) + secHeadToHead(f) +
-        secCategories(f) + secTable(f) + secLedger(f) + secMethod()
+        secCategories(f) + secTrend() + secWhyMedian() + secTable(f) + secLedger(f) + secMethod()
       : blank();
 
     footEl.innerHTML = esc(META.society) + " help desk export &mdash; " + META.total + " tickets, " +
@@ -1111,8 +1476,38 @@ footer{max-width:1180px;margin:0 auto;padding:0 24px 40px;font-size:11.5px;color
       render();
       return;
     }
+    var gr = e.target.closest("[data-grain]");
+    if (gr) { S.grain = gr.getAttribute("data-grain"); TREND_PTS = null; render(); return; }
     var tr = e.target.closest("[data-goto]");
     if (tr) { pick(tr.getAttribute("data-goto")); }
+  });
+
+  /* trend tooltip */
+  var TREND_PTS = null;
+  document.addEventListener("mouseover", function (e) {
+    var band = e.target.closest("[data-band]");
+    var tip = document.getElementById("trendTip");
+    if (!band || !tip) return;
+    var pts = TREND_PTS || (TREND_PTS = trendSeries(S.grain));
+    var p = pts[+band.getAttribute("data-band")];
+    if (!p) return;
+    tip.innerHTML = "<b>" + esc(p.label) + "</b>" +
+      '<div class="r"><i style="background:var(--accent)"></i>Average<span>' + dhm(p.mean) + "</span></div>" +
+      '<div class="r"><i style="background:var(--series-2)"></i>Median<span>' + dhm(p.median) + "</span></div>" +
+      '<div class="r"><i style="background:var(--neutral-mark);opacity:.6"></i>Tickets<span>' + p.n + "</span></div>" +
+      (p.open ? '<div class="prov">' + p.open + " of these " + (p.open === 1 ? "is" : "are") +
+        " still open, so this point is a floor, not a final figure.</div>" : "");
+    var wrap = band.closest(".trend"), wr = wrap.getBoundingClientRect(), br = band.getBoundingClientRect();
+    tip.classList.add("on");
+    var tw = tip.offsetWidth;
+    var left = br.left - wr.left + br.width / 2 - tw / 2;
+    tip.style.left = Math.max(0, Math.min(left, wr.width - tw)) + "px";
+    tip.style.top = (br.top - wr.top + 8) + "px";
+  });
+  document.addEventListener("mouseout", function (e) {
+    if (!e.target.closest("[data-band]")) return;
+    var tip = document.getElementById("trendTip");
+    if (tip) tip.classList.remove("on");
   });
 
   function fallbackCopy(txt, done) {

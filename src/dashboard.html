@@ -19,6 +19,7 @@
   --accent:#2a78d6;
   --accent-ink:#1c5cab;
   --accent-wash:#e8f1fd;
+  --series-2:#eb6834;
   --good:#0ca30c;
   --good-wash:#e6f6e6;
   --bad:#d03b3b;
@@ -41,6 +42,7 @@
     --accent:#3987e5;
     --accent-ink:#7cb2f2;
     --accent-wash:#16273c;
+    --series-2:#d95926;
     --good:#3cbb3c;
     --good-wash:#142a16;
     --bad:#e35f5f;
@@ -63,6 +65,7 @@
   --accent:#3987e5;
   --accent-ink:#7cb2f2;
   --accent-wash:#16273c;
+  --series-2:#d95926;
   --good:#3cbb3c;
   --good-wash:#142a16;
   --bad:#e35f5f;
@@ -266,6 +269,31 @@ svg.chart{display:block;width:100%;height:auto}
 .grid-l{stroke:var(--line-soft);stroke-width:1}
 .bar-lab{font-family:"IBM Plex Mono",monospace;font-size:11px;fill:var(--ink-2);font-weight:500}
 .mark-lab{font-family:"IBM Plex Mono",monospace;font-size:11px;font-weight:600;fill:var(--accent-ink)}
+
+/* ---------- segmented control ---------- */
+.seg{display:inline-flex;background:var(--sunk);border:1px solid var(--line);border-radius:8px;padding:2px;gap:2px}
+.seg button{
+  background:none;border:0;border-radius:6px;cursor:pointer;color:var(--ink-2);
+  font:inherit;font-size:12.5px;padding:5px 13px;transition:background .15s,color .15s;
+}
+.seg button:hover{color:var(--ink)}
+.seg button[aria-pressed="true"]{background:var(--panel);color:var(--accent-ink);font-weight:600;box-shadow:var(--shadow)}
+
+/* ---------- trend chart ---------- */
+.trend{position:relative}
+.tip{
+  position:absolute;pointer-events:none;opacity:0;transition:opacity .12s;
+  background:var(--panel);border:1px solid var(--line);border-radius:8px;
+  box-shadow:var(--shadow);padding:9px 11px;font-size:12px;min-width:150px;z-index:5;
+}
+.tip.on{opacity:1}
+.tip b{display:block;font-size:12px;margin-bottom:5px;color:var(--ink)}
+.tip .r{display:flex;align-items:center;gap:7px;color:var(--ink-2);line-height:1.65}
+.tip .r i{width:9px;height:9px;border-radius:2px;flex:none}
+.tip .r span{margin-left:auto;font-family:"IBM Plex Mono",monospace;font-weight:600;color:var(--ink)}
+.tip .prov{margin-top:6px;padding-top:6px;border-top:1px solid var(--line-soft);color:var(--bad);font-size:11px;line-height:1.45}
+.caption{font-size:12px;color:var(--ink-3);margin:12px 0 0;line-height:1.6;max-width:78ch}
+.caption b{color:var(--ink-2)}
 
 /* ---------- tables ---------- */
 .tbl-tools{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
